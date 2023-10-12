@@ -1,0 +1,7 @@
+encryptionsalt: v1:dWCumX+RuGk=:v1:YjD4Vgdr6wtwXM5U:0RK7RUREfDenw1B30RLR8m939ywq7Q==
+config:
+  iac-pulumi:region: us-east-1
+  iac-pulumi:CidrBlock: "10.0.0.0/16"
+  iac-pulumi:availabilityZones: '["us-east-1a", "us-east-1b", "us-east-1c"]'
+ 
+
