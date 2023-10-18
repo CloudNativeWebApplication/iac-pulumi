@@ -1,20 +1,22 @@
 const pulumi = require("@pulumi/pulumi");
 const aws = require("@pulumi/aws");
 
-const awsAccessKey = new pulumi.Config("aws").require("accessKey");
-
-const awsSecretKey = new pulumi.Config("aws").require("secretKey");
-
+// AWS Configurations
+const awsProfile = new pulumi.Config("aws").require("profile");
 const awsRegion = new pulumi.Config("aws").require("region");
-
 const awsVpcCidr = new pulumi.Config("vpc").require("cidrBlock");
+const keyName = new pulumi.Config().require("keynamepair"); 
+const config = new pulumi.Config();
+const amiId = config.require("ami_id");
 
+
+// Using AWS Profile
 const awsDevProvider = new aws.Provider("awsdev", {
-  accessKey: awsAccessKey,
-  secretKey: awsSecretKey,
+  profile: awsProfile,
   region: awsRegion,
 });
 
+// VPC
 const vpc = new aws.ec2.Vpc("vpc", {
   cidrBlock: awsVpcCidr,
   enableDnsSupport: true,
@@ -24,95 +26,135 @@ const vpc = new aws.ec2.Vpc("vpc", {
   },
 });
 
-const gateway = new aws.ec2.InternetGateway("gateway", {
+// Function to get the availability zones
+async function getAzs() {
+  const zones = await aws.getAvailabilityZones({ state: "available" });
+  return zones.names.slice(0, desiredAzCount);
+}
+
+const desiredAzCount = 3;
+const azs = pulumi.output(getAzs());
+
+// Create 3 public subnets and 3 private subnets, each in a different AZ
+const publicSubnets = azs.apply((azs) =>
+  azs.map((az, i) => {
+    return new aws.ec2.Subnet(`public-subnet-${i + 1}`, {
+      vpcId: vpc.id,
+      cidrBlock: `10.0.${i + 1}.0/24`,
+      mapPublicIpOnLaunch: true,
+      availabilityZone: az,
+      tags: {
+        Name: `public-subnet-${i + 1}`,
+      },
+    });
+  })
+);
+
+const privateSubnets = azs.apply((azNames) =>
+  azNames.map((az, i) => {
+    return new aws.ec2.Subnet(`private-subnet-${i + 1}`, {
+      vpcId: vpc.id,
+      cidrBlock: `10.0.${i + 4}.0/24`,
+      mapPublicIpOnLaunch: false,
+      availabilityZone: az,
+      tags: {
+        Name: `private-subnet-${i + 1}`,
+      },
+    });
+  })
+);
+
+
+
+// Create a public route table and associate public subnets
+const publicRouteTable = new aws.ec2.RouteTable("public-route-table", {
+  vpcId: vpc.id,
+  tags: {
+    Name: "Public Route Table",
+  },
+});
+
+
+// Create a private route table and associate private subnets
+const privateRouteTable = new aws.ec2.RouteTable("private-route-table", {
+  vpcId: vpc.id,
+  tags: {
+    Name: "Private Route Table",
+  },
+});
+
+const publicSubnetAssociations = publicSubnets.apply((subnets) =>
+  subnets.map((subnet, i) => {
+    return new aws.ec2.RouteTableAssociation(`public-route-table-association-${i}`, {
+      routeTableId: publicRouteTable.id,
+      subnetId: subnet.id,
+    });
+  })
+);
+
+const privateSubnetAssociations = privateSubnets.apply((subnets) =>
+  subnets.map((subnet, i) => {
+    return new aws.ec2.RouteTableAssociation(`private-route-table-association-${i}`, {
+      routeTableId: privateRouteTable.id,
+      subnetId: subnet.id,
+    });
+  })
+);
+
+
+const internetGateway = new aws.ec2.InternetGateway("internet-gateway", {
   vpcId: vpc.id,
   tags: {
     Name: "main-gateway",
   },
 });
 
-const availableZones = aws.getAvailabilityZones({ state: "available" });
 
-const desiredAzCount = 3; // You can change this to 2 or 3 as needed
+new aws.ec2.Route("internet-route", {
+  routeTableId: publicRouteTable.id,
+  destinationCidrBlock: "0.0.0.0/0",
+  gatewayId: internetGateway.id,
+});
 
-const azs = availableZones.then((zones) =>
-  zones.names.slice(0, desiredAzCount)
-);
+// Fetch AMI ID from Pulumi Configuration
 
-if (desiredAzCount >= 2 && desiredAzCount <= 3) {
-  const publicSubnets = azs.then((azNames) =>
-    azNames.map((az, i) => {
-      return new aws.ec2.Subnet(`public-subnet-${i + 1}`, {
-        vpcId: vpc.id,
-        cidrBlock: `10.0.${i + 1}.0/24`,
-        mapPublicIpOnLaunch: true,
-        availabilityZone: az,
-        tags: {
-          Name: `public-subnet-${i + 1}`,
-        },
-      });
-    })
-  );
 
-  const privateSubnets = azs.then((azNames) =>
-    azNames.map((az, i) => {
-      return new aws.ec2.Subnet(`private-subnet-${i + 1}`, {
-        vpcId: vpc.id,
-        cidrBlock: `10.0.${i + 6 + 1}.0/24`,
-        mapPublicIpOnLaunch: false,
-        availabilityZone: az,
-        tags: {
-          Name: `private-subnet-${i + 1}`,
-        },
-      });
-    })
-  );
+// Example Application Security Group (customize as needed)
+const appSecurityGroup = new aws.ec2.SecurityGroup("appSecurityGroup", {
+  vpcId: vpc.id,
+  description: "Application Security Group",
+  tags: {
+    Name: "Application Security Group",
+  },
+});
 
-  const publicRouteTable = new aws.ec2.RouteTable("public-route-table", {
-    vpcId: vpc.id,
-    tags: {
-      Name: "Public Route Table",
-    },
-  });
+// Add Ingress Rules (customize as needed)
+new aws.ec2.SecurityGroupRule("sshIngress", {
+  type: "ingress",
+  securityGroupId: appSecurityGroup.id,
+  protocol: "tcp",
+  fromPort: 22,
+  toPort: 22,
+  cidrBlocks: ["0.0.0.0/0"],
+});
 
-  const privateRouteTable = new aws.ec2.RouteTable("private-route-table", {
-    vpcId: vpc.id,
-    tags: {
-      Name: "Private Route Table",
-    },
-  });
 
-  pulumi
-    .all([publicSubnets, privateSubnets])
-    .apply(([publicSubnets, privateSubnets]) => {
-      publicSubnets.forEach((subnet, i) => {
-        new aws.ec2.RouteTableAssociation(
-          `public-route-table-association-${i}`,
-          {
-            routeTableId: publicRouteTable.id,
-            subnetId: subnet.id,
-          }
-        );
-      });
+// EC2 Instance (customize instance details)
+const ec2Instance = new aws.ec2.Instance("webAppInstance", {
+  ami: amiId,
+  instanceType: "t2.micro",
+  vpcSecurityGroupIds: [appSecurityGroup.id],
+  keyName: keyName,
+  subnetId: publicSubnets[0].id, // Change to the desired subnet
+  associatePublicIpAddress: true,
+  rootBlockDevice: {
+    volumeSize: 25,
+    volumeType: "gp2",
+    deleteOnTermination: true,
+  },
+  tags: {
+    Name: pulumi.interpolate`Web Application ${pulumi.getFormattedDate("YYYY_MM_DD_hh_mm_ss", new Date())}`,
+  },
+  disableApiTermination: false,
+});
 
-      privateSubnets.forEach((subnet, i) => {
-        new aws.ec2.RouteTableAssociation(
-          `private-route-table-association-${i}`,
-          {
-            routeTableId: privateRouteTable.id,
-            subnetId: subnet.id,
-          }
-        );
-      });
-
-      new aws.ec2.Route("route", {
-        routeTableId: publicRouteTable.id,
-        destinationCidrBlock: "0.0.0.0/0",
-        gatewayId: gateway.id,
-      });
-    });
-} else {
-  throw new Error("Desired number of availability zones must be 2 or 3");
-}
-
-pulumi.output("vpc_id", vpc.id);
