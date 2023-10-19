@@ -66,6 +66,7 @@ const privateSubnets = azs.apply((azNames) =>
 
 
 
+
 // Create a public route table and associate public subnets
 const publicRouteTable = new aws.ec2.RouteTable("public-route-table", {
   vpcId: vpc.id,
@@ -138,6 +139,33 @@ new aws.ec2.SecurityGroupRule("sshIngress", {
   cidrBlocks: ["0.0.0.0/0"],
 });
 
+new aws.ec2.SecurityGroupRule("httpIngress", {
+  type: "ingress",
+  securityGroupId: appSecurityGroup.id,
+  protocol: "tcp",
+  fromPort: 80,
+  toPort: 80,
+  cidrBlocks: ["0.0.0.0/0"],
+});
+
+new aws.ec2.SecurityGroupRule("httpsIngress", {
+  type: "ingress",
+  securityGroupId: appSecurityGroup.id,
+  protocol: "tcp",
+  fromPort: 443,
+  toPort: 443,
+  cidrBlocks: ["0.0.0.0/0"],
+});
+
+new aws.ec2.SecurityGroupRule("appPortIngress", {
+  type: "ingress",
+  securityGroupId: appSecurityGroup.id,
+  protocol: "tcp",
+  fromPort: 6969,  
+  toPort: 6969,    
+  cidrBlocks: ["0.0.0.0/0"],
+});
+
 
 // EC2 Instance (customize instance details)
 const ec2Instance = new aws.ec2.Instance("webAppInstance", {
@@ -147,13 +175,19 @@ const ec2Instance = new aws.ec2.Instance("webAppInstance", {
   keyName: keyName,
   subnetId: publicSubnets[0].id, // Change to the desired subnet
   associatePublicIpAddress: true,
+  userData: `
+    #!/bin/bash
+    export DATABASE_URL=mysql://root:newone@127.0.0.1
+    export DB_USERNAME=root
+    export DB_PASSWORD=newone
+    `,
   rootBlockDevice: {
     volumeSize: 25,
     volumeType: "gp2",
     deleteOnTermination: true,
   },
   tags: {
-    Name: pulumi.interpolate`Web Application ${pulumi.getFormattedDate("YYYY_MM_DD_hh_mm_ss", new Date())}`,
+    Name: "Webapp instance",
   },
   disableApiTermination: false,
 });
