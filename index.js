@@ -177,9 +177,14 @@ const ec2Instance = new aws.ec2.Instance("webAppInstance", {
   associatePublicIpAddress: true,
   userData: `
     #!/bin/bash
-    export DATABASE_URL=mysql://root:newone@127.0.0.1
-    export DB_USERNAME=root
-    export DB_PASSWORD=newone
+
+    # Create and populate the .env file
+    echo 'DATABASE_URL=mysql://root:newone@127.0.0.1' > /path/to/your/project/directory/.env
+    echo 'DB_USERNAME=root' >> /path/to/your/project/directory/.env
+    echo 'DB_PASSWORD=newone' >> /path/to/your/project/directory/.env
+
+    # Confirm that the .env file is created and contains the values
+    cat /path/to/your/project/directory/.env
     `,
   rootBlockDevice: {
     volumeSize: 25,
