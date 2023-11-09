@@ -6,6 +6,7 @@ const awsProfile = new pulumi.Config("aws").require("profile");
 const awsRegion = new pulumi.Config("aws").require("region");
 const awsVpcCidr = new pulumi.Config("vpc").require("cidrBlock");
 const keyName = new pulumi.Config().require("keynamepair"); 
+const domainName = new pulumi.Config().require("domainname"); 
 
 
 // Function to get the most recent AMI
@@ -276,12 +277,6 @@ db_password= rdsInstance.password
 const ami = pulumi.output(getMostRecentAmi());
 
 
-
-
-
-
-
-
 // Define an IAM role with CloudWatchAgentServerPolicy policy
 const role = new aws.iam.Role("cloudwatch-agent-role", {
   assumeRolePolicy: JSON.stringify({
@@ -343,12 +338,12 @@ const ec2Instance = new aws.ec2.Instance("webAppInstance", {
 
 
 
-const zone = pulumi.output(aws.route53.getZone({ name: "demo.ankithreddy.me", privateZone: false }, { provider: awsDevProvider }));
+const zone = pulumi.output(aws.route53.getZone({ name: domainName, privateZone: false }, { provider: awsDevProvider }));
 
 
 const aRecord = new aws.route53.Record("a-record", {
   zoneId: zone.id,
-  name: "demo.ankithreddy.me", 
+  name: domainName, 
   type: "A",
   ttl: 300,
   records: [ec2Instance.publicIp], 
