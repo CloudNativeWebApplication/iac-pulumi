@@ -181,12 +181,12 @@ new aws.ec2.SecurityGroupRule("lbIngressHttps", {
 });
 
 new aws.ec2.SecurityGroupRule("lbEgressAllTraffic", {
-  type: "egress", // This is an egress rule for outbound traffic
+  type: "egress", 
   securityGroupId: loadbalancerSecurityGroup.id,
-  protocol: "-1", // Use "-1" to represent all protocols
-  fromPort: 0,    // Use 0 to represent all ports
+  protocol: "-1", 
+  fromPort: 0,    
   toPort: 0,
-  cidrBlocks: ["0.0.0.0/0"], // Allow outbound traffic to anywhere
+  cidrBlocks: ["0.0.0.0/0"], 
 });
 
 const dbParameterGroup = new aws.rds.ParameterGroup("dbparametergroup", {
@@ -197,7 +197,6 @@ const dbParameterGroup = new aws.rds.ParameterGroup("dbparametergroup", {
           name: "max_connections",
           value: "100",
       },
-      // Add more parameters as needed
   ],
 });
 
@@ -237,8 +236,8 @@ const privateSubnetIds = privateSubnets.apply(subnets => subnets.map(subnet => s
 
 const dbSubnetGroup = new aws.rds.SubnetGroup("mydbsubnetgroup", {
   subnetIds: [
-    privateSubnets[0].id, // Subnet in one AZ
-    privateSubnets[1].id, // Subnet in another AZ
+    privateSubnets[0].id, 
+    privateSubnets[1].id, 
   ],
 });
 
@@ -262,7 +261,6 @@ new aws.ec2.SecurityGroupRule("appPortIngress", {
   toPort: 6969,    
   sourceSecurityGroupId: loadbalancerSecurityGroup.id,
 });
-
 
 
 
@@ -387,6 +385,9 @@ echo "DATABASE_URL=mysql://${user}:${pass}@${endpoint}" >> /opt/csye6225/.env
 
 
 sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/csye6225/cloud-watchconfig.json -s
+systemctl restart amazon-cloudwatch-agent
+
+
 
 `;
     return Buffer.from(userData).toString('base64');
@@ -428,7 +429,7 @@ const autoScalingGroup = new aws.autoscaling.Group("autoScalingGroup", {
       propagateAtLaunch: true,
   }],
   healthCheckType: "EC2",
-  healthCheckGracePeriod: 300,
+  healthCheckGracePeriod: 600,
 }, { provider: awsDevProvider });
 
 // Auto Scaling Policies
@@ -476,9 +477,6 @@ const cpuLowAlarm = new aws.cloudwatch.MetricAlarm("cpuLowAlarm", {
 });
 
 
-
-
-
 const zone = pulumi.output(aws.route53.getZone({ name: domainName, privateZone: false }, { provider: awsDevProvider }));
 
 
@@ -494,7 +492,6 @@ const loadBalancerDNSRecord = new aws.route53.Record("loadBalancerDNSRecord", {
 }, { provider: awsDevProvider });
 
 exports.loadBalancerDNSName = loadBalancerDNSRecord.name;
-
 exports.loadBalancerSecurityGroupId = loadbalancerSecurityGroup.id;
 
 
