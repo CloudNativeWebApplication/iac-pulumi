@@ -264,34 +264,6 @@ new aws.ec2.SecurityGroupRule("appPortIngress", {
 
 
 
-const rdsInstance = new aws.rds.Instance("myrdsinstance", {
-  allocatedStorage: 20, 
-  storageType: "gp2", 
-  engine: "mariadb", 
-  engineVersion: "10.5", 
-  instanceClass: "db.t2.micro", 
-  multiAz: false,
-  name: "csye6225",
-  username: "csye6225",
-  password: "masterpassword",
-  parameterGroupName: dbParameterGroup.name, 
-  vpcSecurityGroupIds: [dbSecurityGroup.id], 
-  dbSubnetGroupName: dbSubnetGroup.name, 
-  skipFinalSnapshot: true, 
-  publiclyAccessible: false, 
-});
-
-rds_endpoint = rdsInstance.endpoint
-rdwoport = rds_endpoint.apply(endpoint => {
-  const parts = endpoint.split(':');
-  const modifiedEndpoint = `${parts[0]}:${parts[1]}`;
-  return modifiedEndpoint.slice(0, -5); 
-});
-
-
-db_name = rdsInstance.name
-db_username= rdsInstance.username
-db_password= rdsInstance.password
 
 const ami = pulumi.output(getMostRecentAmi());
 
@@ -363,7 +335,49 @@ const listener = new aws.lb.Listener("listener", {
   }],
 }, { provider: awsDevProvider });
 
+const rdsInstance = new aws.rds.Instance("myrdsinstance", {
+  allocatedStorage: 20, 
+  storageType: "gp2", 
+  engine: "mariadb", 
+  engineVersion: "10.5", 
+  instanceClass: "db.t2.micro", 
+  multiAz: false,
+  name: "csye6225",
+  username: "csye6225",
+  password: "masterpassword",
+  parameterGroupName: dbParameterGroup.name, 
+  vpcSecurityGroupIds: [dbSecurityGroup.id], 
+  dbSubnetGroupName: dbSubnetGroup.name, 
+  skipFinalSnapshot: true, 
+  publiclyAccessible: false, 
+});
 
+
+rds_endpoint = rdsInstance.endpoint
+rdwoport = rds_endpoint.apply(endpoint => {
+  const parts = endpoint.split(':');
+  const modifiedEndpoint = `${parts[0]}:${parts[1]}`;
+  return modifiedEndpoint.slice(0, -5); 
+});
+
+
+db_name = rdsInstance.name
+db_username= rdsInstance.username
+db_password= rdsInstance.password
+
+const userData = pulumi.interpolate`#!/bin/bash
+
+echo "DB_USERNAME=${db_username}" > /opt/csye6225/.env
+echo "DB_PASSWORD=${db_password}" >> /opt/csye6225/.env
+echo "DB_NAME=${db_name}" >> /opt/csye6225/.env
+echo "DB_HOST=${rdwoport}" >> /opt/csye6225/.env
+echo "DATABASE_URL=mysql://${db_username}:${db_password}@${rdwoport}" >> /opt/csye6225/.env
+
+sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/csye6225/cloud-watchconfig.json -s
+systemctl restart amazon-cloudwatch-agent
+`;
+
+const base64Script = userData.apply(script => Buffer.from(script).toString('base64'));
 
 const launchTemplate = new aws.ec2.LaunchTemplate("launchTemplate", {
   imageId: ami.id,
@@ -373,25 +387,7 @@ const launchTemplate = new aws.ec2.LaunchTemplate("launchTemplate", {
     associatePublicIpAddress: true,
     securityGroups: [appSecurityGroup.id],
   }],
-  userData: pulumi.all([db_username, db_password, db_name, rdwoport])
-  .apply(([user, pass, name, endpoint]) => {
-    const userData = `#!/bin/bash
-
-echo "DB_USERNAME=${user}" > /opt/csye6225/.env
-echo "DB_PASSWORD=${pass}" >> /opt/csye6225/.env
-echo "DB_NAME=${name}" >> /opt/csye6225/.env
-echo "DB_HOST=${endpoint}" >> /opt/csye6225/.env
-echo "DATABASE_URL=mysql://${user}:${pass}@${endpoint}" >> /opt/csye6225/.env
-
-
-sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/csye6225/cloud-watchconfig.json -s
-systemctl restart amazon-cloudwatch-agent
-
-
-
-`;
-    return Buffer.from(userData).toString('base64');
-  }),
+  userData: base64Script,
 
   iamInstanceProfile: {
     name: instanceProfile.name,
