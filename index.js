@@ -1,5 +1,7 @@
 const pulumi = require("@pulumi/pulumi");
 const aws = require("@pulumi/aws");
+const gcp = require("@pulumi/gcp");
+const AWS = require('aws-sdk');
 
 // AWS Configurations
 const awsProfile = new pulumi.Config("aws").require("profile");
@@ -7,6 +9,10 @@ const awsRegion = new pulumi.Config("aws").require("region");
 const awsVpcCidr = new pulumi.Config("vpc").require("cidrBlock");
 const keyName = new pulumi.Config().require("keynamepair"); 
 const domainName = new pulumi.Config().require("domainname"); 
+const gcpProjectName = new pulumi.Config("gcp").require("project");
+const mailGunDomain = new pulumi.Config().require("mailGunDomain");
+const mailGunKey = new pulumi.Config().require("mailGunKey");
+
 
 
 // Function to get the most recent AMI
@@ -268,30 +274,7 @@ new aws.ec2.SecurityGroupRule("appPortIngress", {
 const ami = pulumi.output(getMostRecentAmi());
 
 
-// Define an IAM role with CloudWatchAgentServerPolicy policy
-const role = new aws.iam.Role("cloudwatch-agent-role", {
-  assumeRolePolicy: JSON.stringify({
-      Version: "2012-10-17",
-      Statement: [{
-          Action: "sts:AssumeRole",
-          Effect: "Allow",
-          Principal: {
-              Service: "ec2.amazonaws.com",
-          },
-      }],
-  }),
-});
 
-
-const policyAttachment = new aws.iam.RolePolicyAttachment("cloudwatch-agent-policy-attachment", {
-  role: role,
-  policyArn: "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
-});
-
-// Create an Instance Profile for the EC2 instance
-const instanceProfile = new aws.iam.InstanceProfile("cloudwatch-agent-instance-profile", {
-  role: role,
-});
 
 
 // Application Load Balancer
@@ -360,10 +343,257 @@ rdwoport = rds_endpoint.apply(endpoint => {
   return modifiedEndpoint.slice(0, -5); 
 });
 
+//GCP
+
+const storageBucket = new gcp.storage.Bucket("assignmentuploadsbucket", {
+  location: "US",
+  forceDestroy: true,  
+});
+
+const serviceAccount = new gcp.serviceaccount.Account("myServiceAccount", {
+  accountId: "my-service-account",
+  displayName: "My Service Account",
+});
+
+const serviceAccountKey = new gcp.serviceaccount.Key("myServiceAccountKey", {
+  serviceAccountId: serviceAccount.name,
+});
+
+const storageAdminBinding = new gcp.projects.IAMMember("storage-admin-binding", {
+  project: gcpProjectName ,
+  member: pulumi.interpolate`serviceAccount:${serviceAccount.email}`,
+  role: "roles/storage.objectAdmin",
+});
+
+// // Create an AWS Secrets Manager secret with a new unique name
+// const secNameforgcpkeys = new aws.secretsmanager.Secret("secNameforgcpkeys", {
+//   name: "secNameforgcpkeys", // Replace with your new unique secret name
+//   description: "Google Cloud service account key for Lambda",
+// });
+
+// // Store the service account key in the new secret
+// const googleCloudSecretVersion = new aws.secretsmanager.SecretVersion("newGoogleCloudSecretVersion", {
+//   secretId: secNameforgcpkeys.id,
+//   secretString: pulumi.all([serviceAccountKey.privateKey, serviceAccount.email, serviceAccountKey.privateKeyId]).apply(([key, email, keyId]) => {
+//     // Convert the base64 encoded key back to a string
+//     const decodedKey = Buffer.from(key, 'base64').toString('utf-8');
+    
+//     // Replace escaped newline characters with actual newline characters
+//     const formattedKey = decodedKey.replace(/\\n/g, '\n');
+
+//     return JSON.stringify({
+//       type: "service_account",
+//       project_id: gcpProjectName,
+//       private_key_id: keyId, 
+//       private_key: formattedKey, // Use the formatted key
+//       client_email: email,
+//       // Include other necessary fields...
+//     });
+//   }),
+// });
+
+
+
+const dynamoDbTable = new aws.dynamodb.Table("myTable", {
+  attributes: [
+      { name: "id", type: "S" }  // Only define attributes used as keys
+  ],
+  hashKey: "id",
+  billingMode: "PAY_PER_REQUEST",
+  // Other configurations...
+});
+
+// Create an SNS Topic
+const snsTopic = new aws.sns.Topic("serverlessTopic", {
+  displayName: "Serverless SNS Topic for Lambda Functions",
+}, { provider: awsDevProvider });
+
+exports.topicName = snsTopic.name;
+exports.topicArn = snsTopic.arn;
+
+
+// Read in the Lambda zip file
+const lambdaZipPath = '/Users/ankithreddy/Desktop/cloud/Nov22/lambda.zip';
+const lambdaZip = new pulumi.asset.FileArchive(lambdaZipPath);
+
+// IAM Role for Lambda Function
+const lambdaRole = new aws.iam.Role("lambdaRole", {
+  assumeRolePolicy: JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [{
+      Action: "sts:AssumeRole",
+      Effect: "Allow",
+      Principal: {
+        Service: "lambda.amazonaws.com",
+      },
+    }],
+  }),
+});
+
+// Attach necessary policies to the role
+const lambdaPolicyDocument = JSON.stringify({
+  Version: "2012-10-17",
+  Statement: [
+      {
+          Effect: "Allow",
+          Action: [
+              "sns:Publish",
+              "dynamodb:PutItem",
+              "dynamodb:GetItem",
+              "secretsmanager:GetSecretValue",
+              "logs:CreateLogGroup",
+				      "logs:CreateLogStream",
+				      "logs:PutLogEvents",
+              "s3:GetObject"
+          ],
+          Resource: "*" 
+      }
+  ]
+});
+
+const lambdaPolicy = new aws.iam.RolePolicy("lambdaPolicy", {
+  role: lambdaRole.id,
+  policy: lambdaPolicyDocument,
+});
+ 
+const serviceAccountKeyString = pulumi.all([serviceAccountKey.privateKey, serviceAccount.email, serviceAccountKey.privateKeyId]).apply(([key, email, keyId]) => {
+  // Decode the base64 encoded private key
+ // Directly create the credentials object with the correctly formatted private key
+
+
+  // Convert the credentials object to a string for use in environment variables
+  const credentialsString = JSON.stringify(key);
+  const decodedStringcredentials = Buffer.from(credentialsString, 'base64').toString('utf-8');
+
+
+
+  // Log the formatted credentials for debugging purposes
+  console.log(`Formatted GCP Service Account Credentials: ${decodedStringcredentials}`);
+  return decodedStringcredentials;
+});
+
+// Create the Lambda function
+const lambda = new aws.lambda.Function("myLambdaFunction", {
+  runtime: aws.lambda.Runtime.NodeJS14dX,
+  code: lambdaZip,
+  handler: "index.handler",  
+  role: lambdaRole.arn,
+  environment: {
+      variables: {
+        SNS_TOPIC_ARN: snsTopic.arn,
+        GCS_BUCKET_NAME: storageBucket.name,
+        DYNAMODB_TABLE_NAME: dynamoDbTable.name,
+        GCP_SERVICE_ACCOUNT: serviceAccountKeyString,
+        MAILGUN_API_KEY: mailGunKey,
+        MAILGUN_DOMAIN: mailGunDomain,
+        
+
+      },
+  },
+}, { provider: awsDevProvider });
+
+// // Create the CloudWatch Log Group
+// const logGroup = new aws.cloudwatch.LogGroup("myLogGroup", {
+//   name: pulumi.interpolate`/aws/lambda/${lambda.name}`,
+//   retentionInDays: 7, // Adjust retention as needed.
+// });
+// // Associate Lambda function with the log group
+// const logGroupLambdaPermission = new aws.lambda.Permission("myLogGroupLambdaPermission", {
+//   action: "lambda:InvokeFunction",
+//   function: lambda.arn,
+//   principal: "logs.amazonaws.com",
+//   sourceArn: logGroup.arn,
+// });
+// const logStream = new aws.cloudwatch.LogStream("myLogStream", {
+//   logGroupName: logGroup.name,
+//   name: "myLogStream", 
+// });
+
+// SNS Subscription to Lambda
+const snsSubscription = new aws.sns.TopicSubscription("snsToLambda", {
+  topic: snsTopic.arn,
+  protocol: "lambda",
+  endpoint: lambda.arn,
+}, { provider: awsDevProvider });
+
+// Lambda permission to allow SNS invocation
+const lambdaPermission = new aws.lambda.Permission("lambdaPermission", {
+  action: "lambda:InvokeFunction",
+  function: lambda.name,
+  principal: "sns.amazonaws.com",
+  sourceArn: snsTopic.arn,
+}, { provider: awsDevProvider });
+
+
+
+
+// Export the name and ARN of the topic
+
+exports.lambdaFunctionArn = lambda.arn;
+
+
 
 db_name = rdsInstance.name
 db_username= rdsInstance.username
 db_password= rdsInstance.password
+sns_arn=  snsTopic.arn;
+
+// Attach an inline policy for SNS publish
+const snsPublishPolicy = new aws.iam.Policy("sns-publish-policy", {
+  name: "sns-publish-policy",
+  description: "Allows publishing to SNS topics",
+  policy: JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Effect: "Allow",
+        Action: "sns:Publish",
+        Resource: "*",
+      },
+    ],
+  }),
+});
+
+// IAM Role for EC2 Instance
+const role = new aws.iam.Role("cloudwatch-agent-role", {
+  assumeRolePolicy: JSON.stringify({
+    Version: "2012-10-17",
+    Statement: [
+      {
+        Action: "sts:AssumeRole",
+        Effect: "Allow",
+        Principal: {
+          Service: "ec2.amazonaws.com",
+        },
+      },
+    ],
+  }),
+  // Add managed policies for CloudWatch Agent and SNS publishing
+  managedPolicyArns: [
+    "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+    snsPublishPolicy.arn,
+  ],
+});
+
+
+
+// Attach the CloudWatchAgentServerPolicy
+const policyAttachment = new aws.iam.RolePolicyAttachment("cloudwatch-agent-policy-attachment", {
+  role: role,
+  policyArn: "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy",
+});
+
+// Attach the sns-publish-policy
+const snsPolicyAttachment = new aws.iam.RolePolicyAttachment("sns-publish-policy-attachment", {
+  role: role,
+  policyArn: snsPublishPolicy.arn,
+});
+
+// Create an Instance Profile for the EC2 instance
+const instanceProfile = new aws.iam.InstanceProfile("cloudwatch-agent-instance-profile", {
+  role: role,
+});
+
 
 const userData = pulumi.interpolate`#!/bin/bash
 
@@ -372,7 +602,7 @@ echo "DB_PASSWORD=${db_password}" >> /opt/csye6225/.env
 echo "DB_NAME=${db_name}" >> /opt/csye6225/.env
 echo "DB_HOST=${rdwoport}" >> /opt/csye6225/.env
 echo "DATABASE_URL=mysql://${db_username}:${db_password}@${rdwoport}" >> /opt/csye6225/.env
-
+echo "SNS_ARN=${sns_arn}" >> /opt/csye6225/.env
 sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl -a fetch-config -m ec2 -c file:/opt/csye6225/cloud-watchconfig.json -s
 systemctl restart amazon-cloudwatch-agent
 `;
@@ -486,6 +716,7 @@ const loadBalancerDNSRecord = new aws.route53.Record("loadBalancerDNSRecord", {
       evaluateTargetHealth: true, 
   }],
 }, { provider: awsDevProvider });
+
 
 exports.loadBalancerDNSName = loadBalancerDNSRecord.name;
 exports.loadBalancerSecurityGroupId = loadbalancerSecurityGroup.id;
