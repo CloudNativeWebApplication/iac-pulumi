@@ -40,4 +40,16 @@ VPC ID: <Your_VPC_ID>
 Contributing
 Feel free to contribute to this project or report issues. We appreciate your contributions to make it better.
 
-Replace <Your_AWS_Access_Key>, <Your_AWS_Secret_Key>, <AWS_Region>, and <VPC_CIDR_Block> with your specific AWS and configuration values. 
+Replace <Your_AWS_Access_Key>, <Your_AWS_Secret_Key>, <AWS_Region>, and <VPC_CIDR_Block> with your specific AWS and configuration values.
+
+
+
+
+TO IMPORT CERTIFICATE 
+
+aws acm import-certificate \
+    --profile demo \
+    --certificate fileb:///Users/ankithreddy/Desktop/demo_ankithreddy.me/demo_ankithreddy_me.crt \
+    --private-key fileb:///Users/ankithreddy/Desktop/demo_ankithreddy.me/private.key \
+    --certificate-chain fileb:///Users/ankithreddy/Desktop/demo_ankithreddy.me/demo_ankithreddy_me.ca-bundle \
+    --region us-east-1

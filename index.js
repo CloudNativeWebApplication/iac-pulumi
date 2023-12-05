@@ -12,6 +12,7 @@ const domainName = new pulumi.Config().require("domainname");
 const gcpProjectName = new pulumi.Config("gcp").require("project");
 const mailGunDomain = new pulumi.Config().require("mailGunDomain");
 const mailGunKey = new pulumi.Config().require("mailGunKey");
+const demoCertArn = new pulumi.Config().require("demoCertArn");
 
 
 
@@ -28,10 +29,12 @@ function getMostRecentAmi() {
 }
 
 // Using AWS Profile
-const awsDevProvider = new aws.Provider("awsdev", {
+const awsProvider = new aws.Provider("awsacc", {
   profile: awsProfile,
   region: awsRegion,
 });
+
+
 
 // VPC
 const vpc = new aws.ec2.Vpc("myVpc", {
@@ -287,7 +290,7 @@ const appLoadBalancer = new aws.lb.LoadBalancer("appLoadBalancer", {
   tags: {
       Name: "MyAppLoadBalancer",
   },
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
 
 // Target Group
 const targetGroup = new aws.lb.TargetGroup("targetGroup", {
@@ -305,18 +308,35 @@ const targetGroup = new aws.lb.TargetGroup("targetGroup", {
     healthyThreshold: 2,
     unhealthyThreshold: 2,
   },
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
 
-// Listener
-const listener = new aws.lb.Listener("listener", {
+
+
+const demoListener = new aws.lb.Listener("demoListener", {
   loadBalancerArn: appLoadBalancer.arn,
-  port: 80,
-  protocol: "HTTP",
+  port: 443,
+  protocol: "HTTPS",
+  sslPolicy: "ELBSecurityPolicy-2016-08",
+  certificateArn: demoCertArn,
   defaultActions: [{
       type: "forward",
       targetGroupArn: targetGroup.arn,
   }],
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
+
+
+
+
+// // Listener
+// const listener = new aws.lb.Listener("listener", {
+//   loadBalancerArn: appLoadBalancer.arn,
+//   port: 80,
+//   protocol: "HTTP",
+//   defaultActions: [{
+//       type: "forward",
+//       targetGroupArn: targetGroup.arn,
+//   }],
+// }, { provider: awsProvider });
 
 const rdsInstance = new aws.rds.Instance("myrdsinstance", {
   allocatedStorage: 20, 
@@ -406,7 +426,7 @@ const dynamoDbTable = new aws.dynamodb.Table("myTable", {
 // Create an SNS Topic
 const snsTopic = new aws.sns.Topic("serverlessTopic", {
   displayName: "Serverless SNS Topic for Lambda Functions",
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
 
 exports.topicName = snsTopic.name;
 exports.topicArn = snsTopic.arn;
@@ -490,7 +510,7 @@ const lambda = new aws.lambda.Function("myLambdaFunction", {
 
       },
   },
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
 
 // // Create the CloudWatch Log Group
 // const logGroup = new aws.cloudwatch.LogGroup("myLogGroup", {
@@ -514,7 +534,7 @@ const snsSubscription = new aws.sns.TopicSubscription("snsToLambda", {
   topic: snsTopic.arn,
   protocol: "lambda",
   endpoint: lambda.arn,
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
 
 // Lambda permission to allow SNS invocation
 const lambdaPermission = new aws.lambda.Permission("lambdaPermission", {
@@ -522,7 +542,7 @@ const lambdaPermission = new aws.lambda.Permission("lambdaPermission", {
   function: lambda.name,
   principal: "sns.amazonaws.com",
   sourceArn: snsTopic.arn,
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
 
 
 
@@ -633,7 +653,7 @@ const launchTemplate = new aws.ec2.LaunchTemplate("launchTemplate", {
   tags: {
     Name: "Webapp instance",
   },
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
 
 
 
@@ -656,7 +676,7 @@ const autoScalingGroup = new aws.autoscaling.Group("autoScalingGroup", {
   }],
   healthCheckType: "EC2",
   healthCheckGracePeriod: 600,
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
 
 // Auto Scaling Policies
 const scaleUpPolicy = new aws.autoscaling.Policy("scaleUpPolicy", {
@@ -703,7 +723,7 @@ const cpuLowAlarm = new aws.cloudwatch.MetricAlarm("cpuLowAlarm", {
 });
 
 
-const zone = pulumi.output(aws.route53.getZone({ name: domainName, privateZone: false }, { provider: awsDevProvider }));
+const zone = pulumi.output(aws.route53.getZone({ name: domainName, privateZone: false }, { provider: awsProvider }));
 
 
 const loadBalancerDNSRecord = new aws.route53.Record("loadBalancerDNSRecord", {
@@ -715,7 +735,7 @@ const loadBalancerDNSRecord = new aws.route53.Record("loadBalancerDNSRecord", {
       zoneId: appLoadBalancer.zoneId, 
       evaluateTargetHealth: true, 
   }],
-}, { provider: awsDevProvider });
+}, { provider: awsProvider });
 
 
 exports.loadBalancerDNSName = loadBalancerDNSRecord.name;
